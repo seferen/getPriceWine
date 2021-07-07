@@ -63,6 +63,7 @@ type LentaResponse struct {
 
 func List(cli *http.Client, fileXLSX *excelize.File) {
 
+	// Get list of exists categories and count of positions
 	resp, err := lentaHttpRequest(cli, http.MethodGet,
 		"https://lenta.com/api/v1/stores/0006/catalog", nil)
 
@@ -74,21 +75,27 @@ func List(cli *http.Client, fileXLSX *excelize.File) {
 
 	log.Println("lenta list result request:", resp.Status)
 
+	// Decode json to object
 	err = dec.Decode(&catalog)
 	if err != nil {
 		log.Panicln(err)
 	}
 	log.Println("catalog was got:", catalog)
 
+	//Create map for result of search categories and found it
 	category := make(map[string]int)
 
 	for _, v := range catalog {
 		v.getIds(category)
 	}
+
+	// Create new Sheet and write head of table
 	var index int
+
 	if len(category) != 0 {
 		// Create a new sheet.
 		index = fileXLSX.NewSheet(sheetName)
+		// create head of tabel
 		fileXLSX.SetCellValue(sheetName, "A1", "code")
 		fileXLSX.SetCellValue(sheetName, "B1", "name")
 		fileXLSX.SetCellValue(sheetName, "C1", "brand")
@@ -99,10 +106,12 @@ func List(cli *http.Client, fileXLSX *excelize.File) {
 
 	log.Println(category)
 
+	// Get positions from found categories
 	var i int = 2
 	for k, v := range category {
 		log.Println(k, v)
 
+		// Request about evety foun category
 		lReq := NewLentaRequest(k, v)
 		b, err := json.Marshal(lReq)
 		if err != nil {
@@ -128,16 +137,13 @@ func List(cli *http.Client, fileXLSX *excelize.File) {
 		}
 		log.Println(lResp)
 
+		// Writin to sheet data from response
 		lResp.WriteXLS(fileXLSX, i)
 
 		i += len(lResp.Skus)
 
 	}
 	fileXLSX.SetActiveSheet(index)
-
-	// defer resp.Body.Close()
-
-	// return lResp
 
 }
 
@@ -160,18 +166,22 @@ func (lResp *LentaResponse) WriteXLS(xlsxFile *excelize.File, startIndex int) {
 
 }
 
+// lentaHttpRequest is a basic function for creating and send http request
 func lentaHttpRequest(cli *http.Client, method string, url string, body io.Reader) (*http.Response, error) {
+	// Create new request
 	req, err := http.NewRequest(method, url, body)
 
 	if err != nil {
 		return nil, err
 	}
 
+	// Add header request
 	req.Header.Add("Content-type", "application/json")
 	req.Header.Add("User-Agent", "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:89.0) Gecko/20100101 Firefox/89.0")
 
 	log.Println(req)
 
+	// Send request
 	resp, err := cli.Do(req)
 	if err != nil {
 		return nil, err
@@ -183,6 +193,7 @@ func lentaHttpRequest(cli *http.Client, method string, url string, body io.Reade
 
 }
 
+// getIds is a function for find id of categories and count position and add it to map
 func (p *position) getIds(category map[string]int) {
 	for _, v := range categories {
 		if v == p.Name {
