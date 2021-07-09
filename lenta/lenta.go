@@ -6,14 +6,14 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strconv"
+	"sync"
 
-	"github.com/360EntSecGroup-Skylar/excelize"
+	"github.com/seferen/getPriceWine/defaulttypes"
 )
 
 var categories = [...]string{"Вино", "Вермуты", "Десертные вина", "Игристое Вино", "Изысканный выбор"}
 
-const sheetName string = "lenta.ru"
+const SheetName = "lenta.ru"
 
 type position struct {
 	Name       string     `json:"name"`
@@ -61,10 +61,11 @@ type LentaResponse struct {
 	TotalCount int `json:"totalCount"`
 }
 
-func List(cli *http.Client, fileXLSX *excelize.File) {
+func GetList(xlsxWriter chan interface{}, wg *sync.WaitGroup) error {
+	defer wg.Done()
 
 	// Get list of exists categories and count of positions
-	resp, err := lentaHttpRequest(cli, http.MethodGet,
+	resp, err := lentaHttpRequest(http.MethodGet,
 		"https://lenta.com/api/v1/stores/0006/catalog", nil)
 
 	defer resp.Body.Close()
@@ -78,7 +79,7 @@ func List(cli *http.Client, fileXLSX *excelize.File) {
 	// Decode json to object
 	err = dec.Decode(&catalog)
 	if err != nil {
-		log.Panicln(err)
+		return err
 	}
 	log.Println("catalog was got:", catalog)
 
@@ -90,24 +91,16 @@ func List(cli *http.Client, fileXLSX *excelize.File) {
 	}
 
 	// Create new Sheet and write head of table
-	var index int
 
 	if len(category) != 0 {
-		// Create a new sheet.
-		index = fileXLSX.NewSheet(sheetName)
-		// create head of tabel
-		fileXLSX.SetCellValue(sheetName, "A1", "code")
-		fileXLSX.SetCellValue(sheetName, "B1", "name")
-		fileXLSX.SetCellValue(sheetName, "C1", "brand")
-		fileXLSX.SetCellValue(sheetName, "D1", "regularPrice")
-		fileXLSX.SetCellValue(sheetName, "E1", "cardPrice")
-		fileXLSX.SetCellValue(sheetName, "F1", "category")
+
+		xlsxWriter <- defaulttypes.HeadSheet{SheetName: SheetName,
+			HeadNames: []string{"id", "category", "name", "brand", "regularPrice", "cardPrice"}}
 	}
 
 	log.Println(category)
 
 	// Get positions from found categories
-	var i int = 2
 	for k, v := range category {
 		log.Println(k, v)
 
@@ -121,7 +114,7 @@ func List(cli *http.Client, fileXLSX *excelize.File) {
 
 		r := bytes.NewReader(b)
 
-		resp, err := lentaHttpRequest(cli, http.MethodPost, "https://lenta.com/api/v1/skus/list", r)
+		resp, err := lentaHttpRequest(http.MethodPost, "https://lenta.com/api/v1/skus/list", r)
 
 		if err != nil {
 			log.Println(err)
@@ -135,39 +128,31 @@ func List(cli *http.Client, fileXLSX *excelize.File) {
 			log.Println(err)
 			continue
 		}
-		log.Println(lResp)
 
-		// Writin to sheet data from response
-		lResp.WriteXLS(fileXLSX, i)
-
-		i += len(lResp.Skus)
+		xlsxWriter <- lResp
 
 	}
-	fileXLSX.SetActiveSheet(index)
+
+	return nil
 
 }
 
-func (lResp *LentaResponse) WriteXLS(xlsxFile *excelize.File, startIndex int) {
+// func (lResp *LentaResponse) WriteXLS(xlsxFile *excelize.File, startIndex int) {
 
-	stopIndex := len(lResp.Skus) + startIndex
-	log.Println("start index:", startIndex, "stop index:", stopIndex, "count:", len(lResp.Skus))
+// 	stopIndex := len(lResp.Skus) + startIndex
+// 	log.Println("start index:", startIndex, "stop index:", stopIndex, "count:", len(lResp.Skus))
 
-	for i := startIndex; i < stopIndex; i++ {
-		v := lResp.Skus[i-startIndex]
-		// log.Println(i, v)
-		iRow := strconv.Itoa(i)
-		xlsxFile.SetCellValue(sheetName, "A"+iRow, v.Code)
-		xlsxFile.SetCellValue(sheetName, "B"+iRow, v.Title)
-		xlsxFile.SetCellValue(sheetName, "C"+iRow, v.Brand)
-		xlsxFile.SetCellValue(sheetName, "D"+iRow, v.RegularPrice.Value)
-		xlsxFile.SetCellValue(sheetName, "E"+iRow, v.CardPrice.Value)
-		xlsxFile.SetCellValue(sheetName, "F"+iRow, v.GaCategory)
-	}
+// 	for i := startIndex; i < stopIndex; i++ {
+// 		v := lResp.Skus[i-startIndex]
+// 		// log.Println(i, v)
+// 		iRow := strconv.Itoa(i)
 
-}
+// 	}
+
+// }
 
 // lentaHttpRequest is a basic function for creating and send http request
-func lentaHttpRequest(cli *http.Client, method string, url string, body io.Reader) (*http.Response, error) {
+func lentaHttpRequest(method string, url string, body io.Reader) (*http.Response, error) {
 	// Create new request
 	req, err := http.NewRequest(method, url, body)
 
@@ -182,7 +167,7 @@ func lentaHttpRequest(cli *http.Client, method string, url string, body io.Reade
 	log.Println(req)
 
 	// Send request
-	resp, err := cli.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
