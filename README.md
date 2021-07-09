@@ -5,3 +5,4 @@ https://www.auchan.ru/ - open
 https://www.perekrestok.ru/ - open
 https://bristol.ru/ - open
 https://www.winelab.ru/ - open
+
