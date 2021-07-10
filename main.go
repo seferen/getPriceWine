@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/360EntSecGroup-Skylar/excelize"
+	"github.com/seferen/getPriceWine/auchan"
 	"github.com/seferen/getPriceWine/defaulttypes"
 	"github.com/seferen/getPriceWine/lenta"
 	"github.com/seferen/getPriceWine/metro"
@@ -17,8 +18,9 @@ var indexes = map[string]int{}
 func init() {
 	log.Println("Application was started")
 	log.Println("alphabe for xlsx file was initiate:", string(abs))
-	indexes[metro.SheetName] = 2
-	indexes[lenta.SheetName] = 2
+	for _, v := range []string{metro.SheetName, lenta.SheetName, auchan.SheetName} {
+		indexes[v] = 2
+	}
 }
 
 func main() {
@@ -40,7 +42,7 @@ func main() {
 	go func(xlsxWriter chan interface{}, quite chan int) {
 		wg := sync.WaitGroup{}
 
-		wg.Add(2)
+		wg.Add(1)
 
 		go func(wg *sync.WaitGroup) {
 			err := metro.GetList(fWr, wg)
@@ -49,6 +51,8 @@ func main() {
 			}
 		}(&wg)
 
+		wg.Add(1)
+
 		go func(wg *sync.WaitGroup) {
 			err := lenta.GetList(fWr, wg)
 
@@ -56,6 +60,12 @@ func main() {
 				log.Println(err)
 			}
 		}(&wg)
+
+		wg.Add(1)
+
+		go func() {
+			auchan.GetList(fWr, &wg)
+		}()
 
 		wg.Wait()
 
@@ -119,7 +129,20 @@ func main() {
 				indexes[lenta.SheetName] += len(objType.Skus)
 
 				log.Println("lenta indexes:", indexes[lenta.SheetName])
+			case auchan.AuchanProdResp:
+				// "id", "category", "name", "price"
+				log.Println(len(objType.Items))
+				for i, v := range objType.Items {
+					ind := strconv.Itoa(i + indexes[auchan.SheetName])
 
+					xlf.SetCellValue(auchan.SheetName, "A"+ind, v.Id)
+					xlf.SetCellValue(auchan.SheetName, "B"+ind, v.CategoryCodes[len(v.CategoryCodes)-1].Name)
+					xlf.SetCellValue(auchan.SheetName, "C"+ind, v.Title)
+					xlf.SetCellValue(auchan.SheetName, "D"+ind, v.Price.Value)
+
+				}
+				indexes[auchan.SheetName] += len(objType.Items)
+				log.Println("auchan indexes:", indexes[auchan.SheetName])
 			}
 		case <-qu:
 			log.Println("stop working job")
