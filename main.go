@@ -2,30 +2,42 @@ package main
 
 import (
 	"log"
+	"regexp"
 	"strconv"
 	"sync"
 
 	"github.com/360EntSecGroup-Skylar/excelize"
+	"github.com/antchfx/htmlquery"
 	"github.com/seferen/getPriceWine/auchan"
+	"github.com/seferen/getPriceWine/bristol"
 	"github.com/seferen/getPriceWine/defaulttypes"
 	"github.com/seferen/getPriceWine/lenta"
 	"github.com/seferen/getPriceWine/metro"
+	"github.com/seferen/getPriceWine/winelab"
 )
 
+var re = regexp.MustCompile(`[\s|a]`)
 var abs = []rune("ABCDEFGHIJKLMNOPQRSTUVWXUZ")
 var indexes = map[string]int{}
 
 func init() {
 	log.Println("Application was started")
 	log.Println("alphabe for xlsx file was initiate:", string(abs))
-	for _, v := range []string{metro.SheetName, lenta.SheetName, auchan.SheetName} {
+	for _, v := range []string{metro.SheetName, lenta.SheetName, auchan.SheetName, bristol.SheetName, winelab.SheetName} {
 		indexes[v] = 2
 	}
 }
 
 func main() {
 
-	defer log.Println("Application wsa finished")
+	defer func() {
+		log.Println("**********was writen***********")
+		for k, v := range indexes {
+			log.Println(k, v)
+
+		}
+		log.Println("Application was finished")
+	}()
 
 	// create channel for writing to xlsx file information
 	fWr := make(chan interface{})
@@ -67,6 +79,24 @@ func main() {
 			auchan.GetList(fWr, &wg)
 		}()
 
+		wg.Add(1)
+		go func() {
+			b := bristol.NewItem()
+
+			err := b.GetList(fWr, &wg)
+			if err != nil {
+				log.Println(err)
+			}
+		}()
+
+		wg.Add(1)
+		go func() {
+			win := winelab.NewItem()
+			if err := win.GetList(fWr, &wg); err != nil {
+				log.Println(err)
+			}
+		}()
+
 		wg.Wait()
 
 		quite <- 0
@@ -78,6 +108,10 @@ func main() {
 		select {
 		case obj := <-fWr:
 			switch objType := obj.(type) {
+
+			case defaulttypes.XlsxWriter:
+				log.Println("Test xlsx writer")
+				objType.XlsxWrite()
 
 			case defaulttypes.HeadSheet:
 
@@ -143,6 +177,66 @@ func main() {
 				}
 				indexes[auchan.SheetName] += len(objType.Items)
 				log.Println("auchan indexes:", indexes[auchan.SheetName])
+
+			case *bristol.BristolResp:
+				// "name", "regularPrice", "cardPrice"
+
+				for i, v := range objType.Nodes {
+
+					ind := strconv.Itoa(i + indexes[bristol.SheetName])
+
+					title := htmlquery.InnerText(htmlquery.FindOne(v, `//div[@class="catalog-title"]/a`))
+					priceN := htmlquery.FindOne(v, `/div/div/div[@class="catalog-price-block"]/span[contains(@class, "catalog-price") and contains(@class, "new")]`)
+					priceO := htmlquery.FindOne(v, `/div/div/div[@class="catalog-price-block"]/span[contains(@class, "catalog-price") and contains(@class, "old")]`)
+					priceC := htmlquery.FindOne(v, `/div/div/div[@class="catalog-price-block"]/span[@class="catalog-price"]`)
+
+					xlf.SetCellValue(bristol.SheetName, "A"+ind, title)
+
+					if priceC != nil {
+						price := re.ReplaceAllString(htmlquery.InnerText(priceC), "")
+						xlf.SetCellValue(bristol.SheetName, "B"+ind, price)
+						xlf.SetCellValue(bristol.SheetName, "C"+ind, price)
+
+					} else {
+						xlf.SetCellValue(bristol.SheetName, "B"+ind, re.ReplaceAllLiteralString(htmlquery.InnerText(priceN), ""))
+						xlf.SetCellValue(bristol.SheetName, "C"+ind, re.ReplaceAllLiteralString(htmlquery.InnerText(priceO), ""))
+
+					}
+
+				}
+				indexes[bristol.SheetName] += len(objType.Nodes)
+				log.Println("bristol indexes:", indexes[bristol.SheetName])
+			case *winelab.WinelabResp:
+
+				// "county", "name", "regularPrice", "withoutDiscont"
+				for i, v := range objType.Nodes {
+					ind := strconv.Itoa(i + indexes[winelab.SheetName])
+					country := htmlquery.InnerText(htmlquery.FindOne(v, `//div[@class="product_card--header"]/div[@class="country_wrapper"]/h3`))
+					title := htmlquery.InnerText(htmlquery.FindOne(v, `//div[@class="product_card--header"]/div[3]`))
+
+					xlf.SetCellValue(winelab.SheetName, "A"+ind, country)
+					xlf.SetCellValue(winelab.SheetName, "B"+ind, title)
+
+					if discount := htmlquery.FindOne(v, `//div[@class="product_card--footer__container"]/div/div/div[@class="discount"]/span[@class="discount__value"]`); discount != nil {
+						xlf.SetCellValue(winelab.SheetName, "C"+ind, defaulttypes.ReDigit.ReplaceAllString(htmlquery.InnerText(discount), ""))
+
+					} else {
+						xlf.SetCellValue(winelab.SheetName, "C"+ind, "0")
+
+					}
+
+					if dataPrice := htmlquery.FindOne(v, `//div[@class="product_card_cart"]/div/@data-price`); dataPrice != nil {
+						xlf.SetCellValue(winelab.SheetName, "D"+ind, htmlquery.InnerText(dataPrice))
+
+					} else {
+						xlf.SetCellValue(winelab.SheetName, "C"+ind, "0")
+
+					}
+
+				}
+				indexes[winelab.SheetName] += len(objType.Nodes)
+				log.Println("winelab indexes:", indexes[winelab.SheetName])
+
 			}
 		case <-qu:
 			log.Println("stop working job")
