@@ -1,17 +1,23 @@
 package bristol
 
 import (
+	"fmt"
 	"log"
 	"net/url"
+	"regexp"
 	"strconv"
 	"sync"
 
 	"github.com/antchfx/htmlquery"
-	"github.com/seferen/getPriceWine/defaulttypes"
+	"github.com/seferen/getPriceWine/common"
 	"golang.org/x/net/html"
 )
 
-const SheetName string = "bristol.ru"
+var index int = 2
+
+const sheetName string = "bristol.ru"
+
+var re = regexp.MustCompile(`[\s|a]`)
 
 type Bristol struct {
 	Url   string
@@ -23,17 +29,60 @@ type BristolResp struct {
 	Nodes []*html.Node
 }
 
-func NewItem() Bristol {
+func (b *BristolResp) XlsxWrite() error {
+	// "name", "regularPrice", "cardPrice"
 
-	return Bristol{Url: "bristol.ru", Paths: []string{"/catalog/alkogol/vina_vinogradnye/", "/catalog/alkogol/igristye_vina/", "/catalog/alkogol/vermut_1/"}}
+	for i, v := range b.Nodes {
+
+		ind := strconv.Itoa(i + index)
+
+		title := htmlquery.InnerText(htmlquery.FindOne(v, `//div[@class="catalog-title"]/a`))
+		priceN := htmlquery.FindOne(v, `/div/div/div[@class="catalog-price-block"]/span[contains(@class, "catalog-price") and contains(@class, "new")]`)
+		priceO := htmlquery.FindOne(v, `/div/div/div[@class="catalog-price-block"]/span[contains(@class, "catalog-price") and contains(@class, "old")]`)
+		priceC := htmlquery.FindOne(v, `/div/div/div[@class="catalog-price-block"]/span[@class="catalog-price"]`)
+
+		common.Xlsx.SetCellValue(sheetName, "A"+ind, title)
+
+		if priceC != nil {
+			price := re.ReplaceAllString(htmlquery.InnerText(priceC), "")
+			common.Xlsx.SetCellValue(sheetName, "B"+ind, price)
+			common.Xlsx.SetCellValue(sheetName, "C"+ind, price)
+
+		} else {
+			common.Xlsx.SetCellValue(sheetName, "B"+ind, re.ReplaceAllLiteralString(htmlquery.InnerText(priceN), ""))
+			common.Xlsx.SetCellValue(sheetName, "C"+ind, re.ReplaceAllLiteralString(htmlquery.InnerText(priceO), ""))
+
+		}
+
+	}
+	index += len(b.Nodes)
+	log.Println("bristol write:", index)
+	return nil
+}
+
+func (b *Bristol) GetWriten() string {
+	return fmt.Sprintf("%s: %d", sheetName, index)
+}
+
+func (b *Bristol) NewItem() {
+	log.Println("Create new instance")
+	b.Url = "bristol.ru"
+	b.Paths = []string{"/catalog/alkogol/vina_vinogradnye/", "/catalog/alkogol/igristye_vina/", "/catalog/alkogol/vermut_1/"}
 
 }
 
-func (b *Bristol) GetList(xlsxWriter chan interface{}, wg *sync.WaitGroup) error {
+func (b *Bristol) WriteHeader(xlsxWriter chan common.XlsxWriter, wg *sync.WaitGroup) error {
 	defer wg.Done()
 	// writing header to xlsx file
-	xlsxWriter <- defaulttypes.HeadSheet{SheetName: SheetName,
+	xlsxWriter <- &common.HeadSheet{SheetName: sheetName,
 		HeadNames: []string{"name", "regularPrice", "cardPrice"}}
+	log.Println("Header was writen")
+	return nil
+
+}
+
+func (b *Bristol) GetList(xlsxWriter chan common.XlsxWriter, wg *sync.WaitGroup) error {
+	defer wg.Done()
 
 	for _, path := range b.Paths {
 		err := b.loadItems(path, 0, 1, xlsxWriter)
@@ -45,7 +94,7 @@ func (b *Bristol) GetList(xlsxWriter chan interface{}, wg *sync.WaitGroup) error
 	return nil
 }
 
-func (b *Bristol) loadItems(urlPath string, index int, page int, xlsxWriter chan interface{}) error {
+func (b *Bristol) loadItems(urlPath string, index int, page int, xlsxWriter chan common.XlsxWriter) error {
 	uri := url.URL{}
 	uri.Scheme = "https"
 	uri.Host = b.Url
@@ -64,7 +113,7 @@ func (b *Bristol) loadItems(urlPath string, index int, page int, xlsxWriter chan
 		return err
 	}
 
-	totalCount, err := strconv.Atoi(defaulttypes.ReDigit.ReplaceAllLiteralString(
+	totalCount, err := strconv.Atoi(common.ReDigit.ReplaceAllLiteralString(
 		htmlquery.InnerText(htmlquery.FindOne(nd, `//div[@class="titleRightDesign"]/span`)), ""))
 
 	log.Println("total count:", totalCount, "index:", index)
@@ -79,7 +128,6 @@ func (b *Bristol) loadItems(urlPath string, index int, page int, xlsxWriter chan
 		}
 
 	}
-	// log.Println(ndres)
 
 	return nil
 }

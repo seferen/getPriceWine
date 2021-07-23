@@ -5,14 +5,20 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 
-	"github.com/seferen/getPriceWine/defaulttypes"
+	"github.com/seferen/getPriceWine/common"
 )
 
-const SheetName = "auchan.ru"
+const sheetName = "auchan.ru"
+
+var index int = 2
 
 var categories = []string{"Вино"}
+
+type Auchan struct {
+}
 
 type AuchanCategItem struct {
 	Id                  int               `json:"id"`
@@ -40,8 +46,46 @@ type AuchanProdResp struct {
 	} `json:"items"`
 }
 
-func GetList(xlsxWriter chan interface{}, wg *sync.WaitGroup) error {
+func (a *AuchanProdResp) XlsxWrite() error {
+	// "id", "category", "name", "price"
+	// log.Println(len(a.Items))
+	for i, v := range a.Items {
+		ind := strconv.Itoa(i + index)
+
+		common.Xlsx.SetCellValue(sheetName, "A"+ind, v.Id)
+		common.Xlsx.SetCellValue(sheetName, "B"+ind, v.CategoryCodes[len(v.CategoryCodes)-1].Name)
+		common.Xlsx.SetCellValue(sheetName, "C"+ind, v.Title)
+		common.Xlsx.SetCellValue(sheetName, "D"+ind, v.Price.Value)
+
+	}
+	index += len(a.Items)
+	log.Println("Auchan write:", index)
+	return nil
+}
+
+func (a *Auchan) GetWriten() string {
+	return fmt.Sprintf("%s: %d", sheetName, index)
+}
+
+func (a *Auchan) NewItem() {
+	log.Println("Create new instanse")
+
+}
+
+func (a *Auchan) WriteHeader(xlsxWriter chan common.XlsxWriter, wg *sync.WaitGroup) error {
 	defer wg.Done()
+
+	xlsxWriter <- &common.HeadSheet{SheetName: sheetName, HeadNames: []string{"id", "category", "name", "price"}}
+
+	log.Println("Header was writen")
+
+	return nil
+}
+
+func (a *Auchan) GetList(xlsxWriter chan common.XlsxWriter, wg *sync.WaitGroup) error {
+	defer wg.Done()
+
+	log.Println("Start getting data")
 
 	// get categories
 	resp, err := http.Get("https://www.auchan.ru/v1/categories?node_code=vino&merchant_id=1&active_only=0&show_hidden=1")
@@ -62,8 +106,6 @@ func GetList(xlsxWriter chan interface{}, wg *sync.WaitGroup) error {
 		return err
 	}
 
-	xlsxWriter <- defaulttypes.HeadSheet{SheetName: SheetName, HeadNames: []string{"id", "category", "name", "price"}}
-
 	for _, v := range categories {
 		for _, c := range cat {
 			err := findCategories(c, v, xlsxWriter)
@@ -78,7 +120,7 @@ func GetList(xlsxWriter chan interface{}, wg *sync.WaitGroup) error {
 	return nil
 }
 
-func findCategories(cat AuchanCategItem, catName string, xlsxWriter chan interface{}) error {
+func findCategories(cat AuchanCategItem, catName string, xlsxWriter chan common.XlsxWriter) error {
 	if catName == cat.Name {
 		cat.Items = nil
 		var maxPage int = cat.ActiveProductsCount/100 + 1
@@ -102,7 +144,7 @@ func findCategories(cat AuchanCategItem, catName string, xlsxWriter chan interfa
 				return err
 			}
 
-			xlsxWriter <- prod
+			xlsxWriter <- &prod
 		}
 
 	} else if len(cat.Items) != 0 {
