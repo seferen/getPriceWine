@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"runtime"
 	"sync"
 
 	"github.com/360EntSecGroup-Skylar/excelize"
@@ -16,6 +17,7 @@ import (
 var elements []common.ListGetter
 
 func init() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 	log.Println("Application was started")
 	elements = []common.ListGetter{
@@ -27,6 +29,10 @@ func init() {
 	}
 }
 
+var wg = sync.WaitGroup{}
+
+var rg = sync.WaitGroup{}
+
 func main() {
 
 	defer func() {
@@ -34,11 +40,12 @@ func main() {
 		for _, elem := range elements {
 			log.Println(elem.GetWriten())
 		}
+		log.Println("*******************************")
 		log.Println("Application was finished")
 	}()
 
 	// create channel for writing to xlsx file information
-	fWr := make(chan common.XlsxWriter)
+	fWr := make(chan common.XlsxWriter, 10)
 	qu := make(chan int)
 
 	// // create file for writing information
@@ -50,7 +57,6 @@ func main() {
 	}(common.Xlsx)
 
 	go func(xlsxWriter chan common.XlsxWriter, quite chan int) {
-		wg := sync.WaitGroup{}
 
 		for _, elem := range elements {
 			elem.NewItem()
@@ -60,6 +66,7 @@ func main() {
 		}
 
 		wg.Wait()
+		rg.Wait()
 
 		quite <- 0
 
@@ -69,11 +76,14 @@ func main() {
 	for {
 		select {
 		case obj := <-fWr:
-
-			err := obj.XlsxWrite()
-			if err != nil {
-				log.Println(err)
-			}
+			rg.Add(1)
+			go func(wg *sync.WaitGroup) {
+				defer wg.Done()
+				err := obj.XlsxWrite()
+				if err != nil {
+					log.Println(err)
+				}
+			}(&rg)
 
 		case <-qu:
 			log.Println("stop working job")
