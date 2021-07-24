@@ -1,8 +1,8 @@
 # Заказ на парсинг крупных винных магазинов
 https://lenta.com/ - resolved
 https://www.metro-cc.ru/ - resolved
-https://www.auchan.ru/ - open
-https://www.perekrestok.ru/ - open
-https://bristol.ru/ - open
-https://www.winelab.ru/ - open
+https://www.auchan.ru/ - resolved
+https://www.perekrestok.ru/ - block
+https://bristol.ru/ - resolved
+https://www.winelab.ru/ - resolved
 

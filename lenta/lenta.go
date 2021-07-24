@@ -3,17 +3,42 @@ package lenta
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 
-	"github.com/seferen/getPriceWine/defaulttypes"
+	"github.com/seferen/getPriceWine/common"
 )
 
-var categories = [...]string{"Вино", "Вермуты", "Десертные вина", "Игристое Вино", "Изысканный выбор"}
+var index int = 2
+
+var categories = []string{"Вино", "Вермуты", "Десертные вина", "Игристое Вино", "Изысканный выбор"}
 
 const SheetName = "lenta.ru"
+
+type Lenta struct {
+}
+
+func (l *Lenta) GetWriten() string {
+	return fmt.Sprintf("%s: %d", SheetName, index)
+}
+
+func (l *Lenta) NewItem() {
+	log.Println("Create new instance")
+
+}
+
+func (l *Lenta) WriteHeader(xlsxWriter chan common.XlsxWriter, wg *sync.WaitGroup) error {
+	defer wg.Done()
+
+	xlsxWriter <- &common.HeadSheet{SheetName: SheetName,
+		HeadNames: []string{"id", "category", "name", "brand", "regularPrice", "cardPrice"}}
+	log.Println("Header was writen")
+	return nil
+}
 
 type position struct {
 	Name       string     `json:"name"`
@@ -61,7 +86,30 @@ type LentaResponse struct {
 	TotalCount int `json:"totalCount"`
 }
 
-func GetList(xlsxWriter chan interface{}, wg *sync.WaitGroup) error {
+func (l *LentaResponse) XlsxWrite() error {
+	// "id", "category", "name", "brand", "regularPrice", "cardPrice"
+	log.Println("from lent was got:", len(l.Skus))
+
+	for i, v := range l.Skus {
+
+		ind := strconv.Itoa(i + index)
+
+		common.Xlsx.SetCellValue(SheetName, "A"+ind, v.Code)
+		common.Xlsx.SetCellValue(SheetName, "B"+ind, v.GaCategory)
+		common.Xlsx.SetCellValue(SheetName, "C"+ind, v.Title)
+		common.Xlsx.SetCellValue(SheetName, "D"+ind, v.Brand)
+		common.Xlsx.SetCellValue(SheetName, "E"+ind, v.RegularPrice.Value)
+		common.Xlsx.SetCellValue(SheetName, "F"+ind, v.CardPrice.Value)
+
+	}
+
+	index += len(l.Skus)
+
+	log.Println("lenta write:", index)
+	return nil
+}
+
+func (l *Lenta) GetList(xlsxWriter chan common.XlsxWriter, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
 	// Get list of exists categories and count of positions
@@ -92,12 +140,6 @@ func GetList(xlsxWriter chan interface{}, wg *sync.WaitGroup) error {
 
 	// Create new Sheet and write head of table
 
-	if len(category) != 0 {
-
-		xlsxWriter <- defaulttypes.HeadSheet{SheetName: SheetName,
-			HeadNames: []string{"id", "category", "name", "brand", "regularPrice", "cardPrice"}}
-	}
-
 	log.Println(category)
 
 	// Get positions from found categories
@@ -112,9 +154,7 @@ func GetList(xlsxWriter chan interface{}, wg *sync.WaitGroup) error {
 			continue
 		}
 
-		r := bytes.NewReader(b)
-
-		resp, err := lentaHttpRequest(http.MethodPost, "https://lenta.com/api/v1/skus/list", r)
+		resp, err := lentaHttpRequest(http.MethodPost, "https://lenta.com/api/v1/skus/list", bytes.NewReader(b))
 
 		if err != nil {
 			log.Println(err)
@@ -129,7 +169,7 @@ func GetList(xlsxWriter chan interface{}, wg *sync.WaitGroup) error {
 			continue
 		}
 
-		xlsxWriter <- lResp
+		xlsxWriter <- &lResp
 
 	}
 
@@ -137,21 +177,6 @@ func GetList(xlsxWriter chan interface{}, wg *sync.WaitGroup) error {
 
 }
 
-// func (lResp *LentaResponse) WriteXLS(xlsxFile *excelize.File, startIndex int) {
-
-// 	stopIndex := len(lResp.Skus) + startIndex
-// 	log.Println("start index:", startIndex, "stop index:", stopIndex, "count:", len(lResp.Skus))
-
-// 	for i := startIndex; i < stopIndex; i++ {
-// 		v := lResp.Skus[i-startIndex]
-// 		// log.Println(i, v)
-// 		iRow := strconv.Itoa(i)
-
-// 	}
-
-// }
-
-// lentaHttpRequest is a basic function for creating and send http request
 func lentaHttpRequest(method string, url string, body io.Reader) (*http.Response, error) {
 	// Create new request
 	req, err := http.NewRequest(method, url, body)
